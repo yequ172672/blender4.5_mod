@@ -324,83 +324,80 @@ size_t BLI_string_flip_side_name(char *name_dst,
 
   BLI_strncpy(prefix, name_dst, name_dst_maxncpy);
 
-  /* First case; separator (`.` or `_`) with extensions in `r R l L`. */
-  if ((len > 1) && is_char_sep(name_dst[len - 2])) {
-    is_set = true;
-    switch (name_dst[len - 1]) {
-      case 'l':
-        prefix[len - 1] = 0;
-        replace = "r";
-        break;
-      case 'r':
-        prefix[len - 1] = 0;
-        replace = "l";
-        break;
-      case 'L':
-        prefix[len - 1] = 0;
-        replace = "R";
-        break;
-      case 'R':
-        prefix[len - 1] = 0;
-        replace = "L";
-        break;
-      default:
-        is_set = false;
+  /* Phase 1: Scan from right to left for single-letter L/R marker
+   * surrounded by separators or string boundaries. */
+  for (size_t i = len; i-- > 0;) {
+    char c = name_dst[i];
+    if (!ELEM(c, 'l', 'L', 'r', 'R')) {
+      continue;
+    }
+    bool left_ok = (i == 0) || is_char_sep(name_dst[i - 1]);
+    bool right_ok = (i == len - 1) || is_char_sep(name_dst[i + 1]);
+    if (left_ok && right_ok) {
+      is_set = true;
+      prefix[i] = '\0';
+      BLI_strncpy(suffix, name_dst + i + 1, name_dst_maxncpy);
+      switch (c) {
+        case 'l':
+          replace = "r";
+          break;
+        case 'r':
+          replace = "l";
+          break;
+        case 'L':
+          replace = "R";
+          break;
+        case 'R':
+          replace = "L";
+          break;
+      }
+      break;
     }
   }
 
-  /* case; beginning with r R l L, with separator after it */
-  if (!is_set && is_char_sep(name_dst[1])) {
-    is_set = true;
-    switch (name_dst[0]) {
-      case 'l':
-        replace = "r";
-        BLI_strncpy(suffix, name_dst + 1, name_dst_maxncpy);
-        prefix[0] = 0;
-        break;
-      case 'r':
-        replace = "l";
-        BLI_strncpy(suffix, name_dst + 1, name_dst_maxncpy);
-        prefix[0] = 0;
-        break;
-      case 'L':
-        replace = "R";
-        BLI_strncpy(suffix, name_dst + 1, name_dst_maxncpy);
-        prefix[0] = 0;
-        break;
-      case 'R':
-        replace = "L";
-        BLI_strncpy(suffix, name_dst + 1, name_dst_maxncpy);
-        prefix[0] = 0;
-        break;
-      default:
-        is_set = false;
-    }
-  }
-
+  /* Phase 2: Scan for full-word left/right marker surrounded by
+   * separators, string boundaries, or camelCase boundaries. */
   if (!is_set && len > 5) {
-    /* Test for a separator to apply the rule: ultimate left or right. */
-    if (((index = BLI_strcasestr(prefix, "right")) == prefix) || (index == prefix + len - 5)) {
-      is_set = true;
-      if (index[0] == 'r') {
-        replace = "left";
+    const char *words[] = {"right", "left", nullptr};
+    const char *lo[] = {"left", "right", nullptr};
+    const char *up[] = {"Left", "Right", nullptr};
+    const char *hi[] = {"LEFT", "RIGHT", nullptr};
+    for (int w = 0; words[w]; w++) {
+      size_t wlen = strlen(words[w]);
+      /* Scan right-to-left for suffix priority. */
+      for (size_t end = len; end >= wlen; end--) {
+        size_t pos = end - wlen;
+        if (BLI_strncasecmp(name_dst + pos, words[w], wlen) != 0) {
+          continue;
+        }
+
+        /* Left boundary check. */
+        bool left_ok = (pos == 0) || is_char_sep(name_dst[pos - 1]) ||
+                       (islower(name_dst[pos - 1]) && isupper(name_dst[pos])) ||
+                       (isdigit(name_dst[pos - 1]) && isupper(name_dst[pos]));
+
+        /* Right boundary check. */
+        size_t after = pos + wlen;
+        bool right_ok = (after >= len) || is_char_sep(name_dst[after]) ||
+                        (islower(name_dst[after - 1]) && isupper(name_dst[after]));
+
+        if (left_ok && right_ok) {
+          is_set = true;
+          /* Preserve case style. */
+          if (isupper(name_dst[pos])) {
+            replace = (name_dst[pos + 1] == toupper(words[w][1])) ? hi[w] : up[w];
+          }
+          else {
+            replace = lo[w];
+          }
+          prefix[pos] = '\0';
+          BLI_strncpy(suffix, name_dst + after, name_dst_maxncpy);
+          break;
+        }
       }
-      else {
-        replace = (index[1] == 'I' ? "LEFT" : "Left");
+      if (is_set) {
+        break;
       }
-      *index = 0;
-      BLI_strncpy(suffix, index + 5, name_dst_maxncpy);
-    }
-    else if (((index = BLI_strcasestr(prefix, "left")) == prefix) || (index == prefix + len - 4)) {
-      is_set = true;
-      if (index[0] == 'l') {
-        replace = "right";
-      }
-      else {
-        replace = (index[1] == 'E' ? "RIGHT" : "Right");
-      }
-      *index = 0;
-      BLI_strncpy(suffix, index + 4, name_dst_maxncpy);
     }
   }
 

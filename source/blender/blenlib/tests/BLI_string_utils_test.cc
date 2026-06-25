@@ -87,4 +87,73 @@ TEST(BLI_string_utils, BLI_uniquename_cb)
   }
 }
 
+TEST(BLI_string_utils, BLI_string_flip_side_name)
+{
+  char result[64];
+
+  /* Existing behavior: suffix single letter. */
+  BLI_string_flip_side_name(result, "Bone.L", false, sizeof(result));
+  EXPECT_STREQ(result, "Bone.R");
+
+  BLI_string_flip_side_name(result, "Bone_R", false, sizeof(result));
+  EXPECT_STREQ(result, "Bone_L");
+
+  /* Existing behavior: prefix single letter. */
+  BLI_string_flip_side_name(result, "L_Bone", false, sizeof(result));
+  EXPECT_STREQ(result, "R_Bone");
+
+  BLI_string_flip_side_name(result, "L-Bone", false, sizeof(result));
+  EXPECT_STREQ(result, "R-Bone");
+
+  /* Existing behavior: full word at start/end. */
+  BLI_string_flip_side_name(result, "leftArm", false, sizeof(result));
+  EXPECT_STREQ(result, "rightArm");
+
+  BLI_string_flip_side_name(result, "Arm_right", false, sizeof(result));
+  EXPECT_STREQ(result, "Arm_left");
+
+  BLI_string_flip_side_name(result, "RIGHT_arm", false, sizeof(result));
+  EXPECT_STREQ(result, "LEFT_arm");
+
+  /* No marker: unchanged. */
+  BLI_string_flip_side_name(result, "Spine", false, sizeof(result));
+  EXPECT_STREQ(result, "Spine");
+
+  /* New behavior: mid-string markers with separators. */
+  BLI_string_flip_side_name(result, "bip001-L-UpperArm", false, sizeof(result));
+  EXPECT_STREQ(result, "bip001-R-UpperArm");
+
+  BLI_string_flip_side_name(result, "bip001 L UpperArm", false, sizeof(result));
+  EXPECT_STREQ(result, "bip001 R UpperArm");
+
+  BLI_string_flip_side_name(result, "bip001.L.UpperArm", false, sizeof(result));
+  EXPECT_STREQ(result, "bip001.R.UpperArm");
+
+  BLI_string_flip_side_name(result, "bip001_left_upper", false, sizeof(result));
+  EXPECT_STREQ(result, "bip001_right_upper");
+
+  BLI_string_flip_side_name(result, "Bone-L-001", false, sizeof(result));
+  EXPECT_STREQ(result, "Bone-R-001");
+
+  BLI_string_flip_side_name(result, "bip001-left-hand", false, sizeof(result));
+  EXPECT_STREQ(result, "bip001-right-hand");
+
+  /* New behavior: camelCase boundaries. */
+  BLI_string_flip_side_name(result, "ManLeftHand", false, sizeof(result));
+  EXPECT_STREQ(result, "ManRightHand");
+
+  BLI_string_flip_side_name(result, "bip001RightHand", false, sizeof(result));
+  EXPECT_STREQ(result, "bip001LeftHand");
+
+  BLI_string_flip_side_name(result, "ManRight", false, sizeof(result));
+  EXPECT_STREQ(result, "ManLeft");
+
+  /* Edge cases. */
+  BLI_string_flip_side_name(result, "L", false, sizeof(result));
+  EXPECT_STREQ(result, "L");
+
+  BLI_string_flip_side_name(result, "ArmLength", false, sizeof(result));
+  EXPECT_STREQ(result, "ArmLength");
+}
+
 }  // namespace blender
