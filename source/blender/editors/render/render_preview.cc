@@ -195,12 +195,12 @@ void ED_preview_ensure_dbase(const bool with_gpencil)
   BLI_assert(BLI_thread_is_main());
   if (!base_initialized) {
     G.pr_main = load_main_from_memory(datatoc_preview_blend, datatoc_preview_blend_size);
-    base_initialized = true;
+    base_initialized = (G.pr_main != nullptr);
   }
   if (!base_initialized_gpencil && with_gpencil) {
     G_pr_main_grease_pencil = load_main_from_memory(datatoc_preview_grease_pencil_blend,
                                                     datatoc_preview_grease_pencil_blend_size);
-    base_initialized_gpencil = true;
+    base_initialized_gpencil = (G_pr_main_grease_pencil != nullptr);
   }
 #else
   UNUSED_VARS(with_gpencil);
@@ -477,6 +477,10 @@ static Scene *preview_prepare_scene(
 {
   Scene *sce;
   Main *pr_main = sp->pr_main;
+
+  if (pr_main == nullptr) {
+    return nullptr;
+  }
 
   memcpy(pr_main->filepath, BKE_main_blendfile_path(bmain), sizeof(pr_main->filepath));
 
