@@ -689,8 +689,134 @@ static PyObject *pygpu_texture_from_image(PyObject * /*self*/, PyObject *arg)
   return BPyGPUTexture_CreatePyObject(tex, true);
 }
 
+PyDoc_STRVAR(
+    /* Wrap. */
+    pygpu_texture_from_bytes_doc,
+    ".. function:: from_bytes(width, height, data, format='RGBA8', name='python_texture_bytes')\n"
+    "\n"
+    "   Create a 2D GPUTexture directly from tightly packed 8-bit RGBA bytes.\n"
+    "\n"
+    "   This helper is intended for high-throughput viewport preview code that already has decoded "
+    "pixel bytes and does not need an Image datablock.\n"
+    "\n"
+    "   :arg width: Texture width in pixels.\n"
+    "   :type width: int\n"
+    "   :arg height: Texture height in pixels.\n"
+    "   :type height: int\n"
+    "   :arg data: Contiguous bytes-like object with exactly ``width * height * 4`` bytes.\n"
+    "   :type data: bytes | bytearray | memoryview\n"
+    "   :arg format: GPU texture format. Supported values are `RGBA8` and `SRGB8_A8`.\n"
+    "   :type format: str\n"
+    "   :arg name: Internal texture name.\n"
+    "   :type name: str\n"
+    "   :return: Newly created GPU texture.\n"
+    "   :rtype: :class:`gpu.types.GPUTexture`\n");
+static PyObject *pygpu_texture_from_bytes(PyObject * /*self*/, PyObject *args, PyObject *kwds)
+{
+  BPYGPU_IS_INIT_OR_ERROR_OBJ;
+
+  int width = 0;
+  int height = 0;
+  PyObject *data_obj = nullptr;
+  PyC_StringEnum pygpu_textureformat = {pygpu_textureformat_items, GPU_RGBA8};
+  const char *name = "python_texture_bytes";
+
+  static const char *_keywords[] = {"width", "height", "data", "format", "name", nullptr};
+  static _PyArg_Parser _parser = {
+      PY_ARG_PARSER_HEAD_COMPAT()
+      "ii" /* `width`, `height` */
+      "O"  /* `data` */
+      "|$" /* Optional keyword only arguments. */
+      "O&" /* `format` */
+      "s"  /* `name` */
+      ":from_bytes",
+      _keywords,
+      nullptr,
+  };
+  if (!_PyArg_ParseTupleAndKeywordsFast(args,
+                                        kwds,
+                                        &_parser,
+                                        &width,
+                                        &height,
+                                        &data_obj,
+                                        PyC_ParseStringEnum,
+                                        &pygpu_textureformat,
+                                        &name))
+  {
+    return nullptr;
+  }
+
+  if (width < 1 || height < 1) {
+    PyErr_SetString(PyExc_ValueError, "from_bytes: width and height must be greater than zero");
+    return nullptr;
+  }
+
+  if (!ELEM(pygpu_textureformat.value_found, GPU_RGBA8, GPU_SRGB8_A8)) {
+    PyErr_SetString(PyExc_ValueError, "from_bytes: only `RGBA8` and `SRGB8_A8` are supported");
+    return nullptr;
+  }
+
+  if (!GPU_context_active_get()) {
+    PyErr_SetString(PyExc_RuntimeError, "from_bytes: No active GPU context found");
+    return nullptr;
+  }
+
+  Py_buffer pybuffer;
+  if (PyObject_GetBuffer(data_obj, &pybuffer, PyBUF_SIMPLE) == -1) {
+    return nullptr;
+  }
+
+  if (!PyBuffer_IsContiguous(&pybuffer, 'C')) {
+    PyBuffer_Release(&pybuffer);
+    PyErr_SetString(PyExc_BufferError, "from_bytes: data must be C-contiguous");
+    return nullptr;
+  }
+
+  if (height > PY_SSIZE_T_MAX / width / 4) {
+    PyBuffer_Release(&pybuffer);
+    PyErr_SetString(PyExc_OverflowError, "from_bytes: texture byte size is too large");
+    return nullptr;
+  }
+
+  const Py_ssize_t expected_len = Py_ssize_t(width) * Py_ssize_t(height) * 4;
+  if (pybuffer.len != expected_len) {
+    PyBuffer_Release(&pybuffer);
+    PyErr_Format(PyExc_ValueError,
+                 "from_bytes: expected %zd bytes for %dx%d RGBA data, got %zd",
+                 expected_len,
+                 width,
+                 height,
+                 pybuffer.len);
+    return nullptr;
+  }
+
+  GPUTexture *tex = GPU_texture_create_2d(name,
+                                          width,
+                                          height,
+                                          1,
+                                          eGPUTextureFormat(pygpu_textureformat.value_found),
+                                          GPU_TEXTURE_USAGE_SHADER_READ |
+                                              GPU_TEXTURE_USAGE_HOST_READ,
+                                          nullptr);
+  if (tex == nullptr) {
+    PyBuffer_Release(&pybuffer);
+    PyErr_SetString(PyExc_RuntimeError, "from_bytes: GPU texture creation failed");
+    return nullptr;
+  }
+
+  GPU_texture_update(tex, GPU_DATA_UBYTE, pybuffer.buf);
+  GPU_texture_original_size_set(tex, width, height);
+  PyBuffer_Release(&pybuffer);
+
+  return BPyGPUTexture_CreatePyObject(tex, false);
+}
+
 static PyMethodDef pygpu_texture__m_methods[] = {
     {"from_image", (PyCFunction)pygpu_texture_from_image, METH_O, pygpu_texture_from_image_doc},
+    {"from_bytes",
+     (PyCFunction)pygpu_texture_from_bytes,
+     METH_VARARGS | METH_KEYWORDS,
+     pygpu_texture_from_bytes_doc},
     {nullptr, nullptr, 0, nullptr},
 };
 
