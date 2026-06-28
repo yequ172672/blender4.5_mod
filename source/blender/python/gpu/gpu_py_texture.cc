@@ -692,7 +692,7 @@ static PyObject *pygpu_texture_from_image(PyObject * /*self*/, PyObject *arg)
 PyDoc_STRVAR(
     /* Wrap. */
     pygpu_texture_from_bytes_doc,
-    ".. function:: from_bytes(width, height, data, format='RGBA8', name='python_texture_bytes')\n"
+    ".. function:: from_bytes(width, height, data, format='RGBA8', name='python_texture_bytes', swizzle=None)\n"
     "\n"
     "   Create a 2D GPUTexture directly from tightly packed 8-bit RGBA bytes.\n"
     "\n"
@@ -709,6 +709,10 @@ PyDoc_STRVAR(
     "   :type format: str\n"
     "   :arg name: Internal texture name.\n"
     "   :type name: str\n"
+    "   :arg swizzle: Optional swizzle mask string of 4 characters (e.g. ``\"bgra\"``, ``\"rrrr\"``).\n"
+    "      Each character must be one of ``r``, ``g``, ``b``, ``a``, ``0``, or ``1``.\n"
+    "      When ``None``, the default identity swizzle (``\"rgba\"``) is used.\n"
+    "   :type swizzle: str | None\n"
     "   :return: Newly created GPU texture.\n"
     "   :rtype: :class:`gpu.types.GPUTexture`\n");
 static PyObject *pygpu_texture_from_bytes(PyObject * /*self*/, PyObject *args, PyObject *kwds)
@@ -720,8 +724,9 @@ static PyObject *pygpu_texture_from_bytes(PyObject * /*self*/, PyObject *args, P
   PyObject *data_obj = nullptr;
   PyC_StringEnum pygpu_textureformat = {pygpu_textureformat_items, GPU_RGBA8};
   const char *name = "python_texture_bytes";
+  const char *swizzle = nullptr;
 
-  static const char *_keywords[] = {"width", "height", "data", "format", "name", nullptr};
+  static const char *_keywords[] = {"width", "height", "data", "format", "name", "swizzle", nullptr};
   static _PyArg_Parser _parser = {
       PY_ARG_PARSER_HEAD_COMPAT()
       "ii" /* `width`, `height` */
@@ -729,6 +734,7 @@ static PyObject *pygpu_texture_from_bytes(PyObject * /*self*/, PyObject *args, P
       "|$" /* Optional keyword only arguments. */
       "O&" /* `format` */
       "s"  /* `name` */
+      "z"  /* `swizzle` */
       ":from_bytes",
       _keywords,
       nullptr,
@@ -741,7 +747,8 @@ static PyObject *pygpu_texture_from_bytes(PyObject * /*self*/, PyObject *args, P
                                         &data_obj,
                                         PyC_ParseStringEnum,
                                         &pygpu_textureformat,
-                                        &name))
+                                        &name,
+                                        &swizzle))
   {
     return nullptr;
   }
@@ -795,8 +802,7 @@ static PyObject *pygpu_texture_from_bytes(PyObject * /*self*/, PyObject *args, P
                                           height,
                                           1,
                                           eGPUTextureFormat(pygpu_textureformat.value_found),
-                                          GPU_TEXTURE_USAGE_SHADER_READ |
-                                              GPU_TEXTURE_USAGE_HOST_READ,
+                                          GPU_TEXTURE_USAGE_SHADER_READ,
                                           nullptr);
   if (tex == nullptr) {
     PyBuffer_Release(&pybuffer);
