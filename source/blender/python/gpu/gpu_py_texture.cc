@@ -814,6 +814,29 @@ static PyObject *pygpu_texture_from_bytes(PyObject * /*self*/, PyObject *args, P
   GPU_texture_original_size_set(tex, width, height);
   PyBuffer_Release(&pybuffer);
 
+  /* Apply swizzle mask if provided. */
+  if (swizzle != nullptr) {
+    if (strlen(swizzle) != 4) {
+      GPU_texture_free(tex);
+      PyErr_SetString(PyExc_ValueError,
+                      "from_bytes: swizzle must be a 4-character string (e.g. \"bgra\")");
+      return nullptr;
+    }
+    for (int i = 0; i < 4; i++) {
+      if (!ELEM(swizzle[i], 'r', 'g', 'b', 'a', '0', '1')) {
+        GPU_texture_free(tex);
+        PyErr_Format(PyExc_ValueError,
+                     "from_bytes: invalid swizzle character '%c' at position %d. "
+                     "Allowed: r, g, b, a, 0, 1",
+                     swizzle[i],
+                     i);
+        return nullptr;
+      }
+    }
+    char swizzle_array[4] = {swizzle[0], swizzle[1], swizzle[2], swizzle[3]};
+    GPU_texture_swizzle_set(tex, swizzle_array);
+  }
+
   return BPyGPUTexture_CreatePyObject(tex, false);
 }
 
