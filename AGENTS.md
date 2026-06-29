@@ -37,6 +37,23 @@ Blender 是一款免费开源的 3D 创作套件，支持建模、雕刻、动�
 - 核心 C/C++ 源码在 `source/blender/`，是最常修改的区域
 - `source/blender/makesdna/` 定义数据结构，`source/blender/makesrna/` 定义 RNA 属性系统
 
+### Git Push Rules
+此仓库是 GitHub fork（`yequ172672/blender4.5_mod`），fork 时 LFS 二进制文件未完整迁移，直接 `git push` 会因 LFS 配额限制失败。
+
+**推送方式**：必须跳过 LFS 上传
+```bash
+GIT_LFS_SKIP_PUSH=1 git push origin blender-v4.5-release
+```
+注意：`git push --no-verify` 不能解决此问题（LFS 配额是 GitHub 服务端限制）。
+
+**同步上游官方 Blender**：
+```bash
+git remote add upstream https://github.com/blender/blender.git
+git fetch upstream blender-v4.5-release
+git merge upstream/blender-v4.5-release
+# 推送时同样需要 GIT_LFS_SKIP_PUSH=1
+```
+
 ### Testing Requirements
 - C++ 测试在 `tests/gtests/`
 - Python 测试在 `tests/python/`
