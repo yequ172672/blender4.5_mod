@@ -129,6 +129,7 @@ set(LIB
   PRIVATE bf::intern::guardedalloc
   PRIVATE bf::animrig
   bf_python_gpu
+  bf_python_fmodel
   PRIVATE bf::imbuf::opencolorio
 
   ${PYTHON_LINKFLAGS}

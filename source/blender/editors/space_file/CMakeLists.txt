@@ -18,6 +18,9 @@ set(SRC
   asset_catalog_tree_view.cc
   file_context.cc
   file_draw.cc
+  file_fmodel_bridge.cc
+  file_fmodel_http.cc
+  file_fmodel_tree_view.cc
   file_indexer.cc
   file_ops.cc
   file_panels.cc
@@ -29,6 +32,9 @@ set(SRC
   fsmenu_system.cc
   space_file.cc
 
+  file_fmodel_bridge.hh
+  file_fmodel_http.hh
+  file_fmodel_tree_view.hh
   file_indexer.hh
   file_intern.hh
   filelist.hh

@@ -134,6 +134,33 @@ static void fileselect_ensure_updated_asset_params(SpaceFile *sfile)
   fileselect_initialize_params_common(sfile, base_params);
 }
 
+static void fileselect_ensure_updated_fmodel_params(SpaceFile *sfile)
+{
+  BLI_assert(sfile->browse_mode == FILE_BROWSE_MODE_FMODEL);
+
+  if (!sfile->params) {
+    sfile->params = MEM_callocN<FileSelectParams>("fileselparams");
+    sfile->params->filter_glob[0] = '\0';
+    sfile->params->thumbnail_size = 128;
+    sfile->params->details_flags = U_default.file_space_data.details_flags;
+    sfile->params->filter_id = 0;
+    sfile->params->list_thumbnail_size = 32;
+    sfile->params->list_column_size = 220;
+    /* Default to /Game/ root before common init so it isn't overridden. */
+    STRNCPY(sfile->params->dir, "/Game/");
+  }
+
+  FileSelectParams *params = sfile->params;
+  fileselect_initialize_params_common(sfile, params);
+  params->type = FILE_FMODEL_HTTP;
+  params->display = FILE_IMGDISPLAY;
+  params->sort = FILE_SORT_ALPHA;
+  params->filter = 0;
+  params->filter_id = 0;
+  params->flag &= ~FILE_DIRSEL_ONLY;
+  params->flag |= FILE_FILTER;
+}
+
 /**
  * \note #RNA_struct_property_is_set_ex is used here because we want
  * the previously used settings to be used here rather than overriding them.
@@ -373,6 +400,11 @@ FileSelectParams *ED_fileselect_ensure_active_params(SpaceFile *sfile)
         fileselect_ensure_updated_asset_params(sfile);
       }
       return &sfile->asset_params->base_params;
+    case FILE_BROWSE_MODE_FMODEL:
+      if (!sfile->params) {
+        fileselect_ensure_updated_fmodel_params(sfile);
+      }
+      return sfile->params;
   }
 
   BLI_assert_msg(0, "Invalid browse mode set in file space.");
@@ -391,6 +423,8 @@ FileSelectParams *ED_fileselect_get_active_params(const SpaceFile *sfile)
       return sfile->params;
     case FILE_BROWSE_MODE_ASSETS:
       return (FileSelectParams *)sfile->asset_params;
+    case FILE_BROWSE_MODE_FMODEL:
+      return sfile->params;
   }
 
   BLI_assert_msg(0, "Invalid browse mode set in file space.");

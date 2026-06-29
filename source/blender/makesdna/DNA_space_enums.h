@@ -490,6 +490,8 @@ typedef enum eFileBrowse_Mode {
   FILE_BROWSE_MODE_FILES = 0,
   /* Asset Browser */
   FILE_BROWSE_MODE_ASSETS = 1,
+  /* FModel Browser */
+  FILE_BROWSE_MODE_FMODEL = 2,
 } eFileBrowse_Mode;
 
 /** #FileSelectParams.display */
@@ -561,6 +563,9 @@ typedef enum eFileSelectType {
   FILE_ASSET_LIBRARY = 4,
   /** Load all asset libraries. */
   FILE_ASSET_LIBRARY_ALL = 5,
+
+  /** Custom type for FModel HeadlessHost HTTP-backed asset tree browsing. */
+  FILE_FMODEL_HTTP = 10,
 
   FILE_UNIX = 8,
   FILE_BLENDER = 8, /* don't display relative paths */

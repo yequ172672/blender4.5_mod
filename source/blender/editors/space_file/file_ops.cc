@@ -203,6 +203,15 @@ static FileSelect file_select_do(bContext *C, int selected_idx, bool do_diropen)
           BLI_path_abs(params->dir, BKE_main_blendfile_path(bmain));
           BLI_path_normalize_dir(params->dir, sizeof(params->dir));
         }
+        else if (params->type == FILE_FMODEL_HTTP) {
+          /* FModel: simple string append with '/' separator, no path normalization. */
+          char temp[FILE_MAX];
+          SNPRINTF(temp, "%s%s%s",
+                   params->dir,
+                   (params->dir[strlen(params->dir) - 1] == '/') ? "" : "/",
+                   file->relpath);
+          STRNCPY(params->dir, temp);
+        }
         else {
           BLI_path_abs(params->dir, BKE_main_blendfile_path(bmain));
           BLI_path_normalize_dir(params->dir, sizeof(params->dir));
@@ -2083,12 +2092,40 @@ static bool file_execute(bContext *C, SpaceFile *sfile)
     if (FILENAME_IS_PARENT(file->relpath)) {
       BLI_path_parent_dir(params->dir);
     }
+    else if (params->type == FILE_FMODEL_HTTP) {
+      /* FModel: simple string append, no path normalization. */
+      char temp[FILE_MAX];
+      SNPRINTF(temp, "%s%s%s",
+               params->dir,
+               (params->dir[strlen(params->dir) - 1] == '/') ? "" : "/",
+               file->relpath);
+      STRNCPY(params->dir, temp);
+    }
     else {
       BLI_path_abs(params->dir, BKE_main_blendfile_path(bmain));
       BLI_path_normalize_native(params->dir);
       BLI_path_append_dir(params->dir, sizeof(params->dir), file->relpath);
     }
     ED_file_change_dir(C);
+  }
+  /* FModel double-click: preview asset. */
+  else if (params->type == FILE_FMODEL_HTTP && file) {
+    /* Construct full UE asset path */
+    char asset_id[FILE_MAX];
+    SNPRINTF(asset_id, "%s%s%s",
+             params->dir,
+             (params->dir[strlen(params->dir) - 1] == '/') ? "" : "/",
+             file->relpath);
+
+    /* Call Python operator fmodel.preview_asset */
+    wmOperatorType *ot = WM_operatortype_find("fmodel.preview_asset", false);
+    if (ot) {
+      PointerRNA ptr;
+      WM_operator_properties_create_ptr(&ptr, ot);
+      RNA_string_set(&ptr, "asset_id", asset_id);
+      WM_operator_name_call_ptr(C, ot, WM_OP_EXEC_DEFAULT, &ptr, nullptr);
+      WM_operator_properties_free(&ptr);
+    }
   }
   /* Opening file, sends events now, so things get handled on window-queue level. */
   else if (sfile->op) {

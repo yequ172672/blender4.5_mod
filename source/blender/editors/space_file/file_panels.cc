@@ -33,6 +33,7 @@
 #include "WM_api.hh"
 #include "WM_types.hh"
 
+#include "file_fmodel_tree_view.hh"
 #include "file_intern.hh"
 #include "filelist.hh"
 
@@ -269,5 +270,20 @@ void file_tools_region_panels_register(ARegionType *art)
   pt->flag = PANEL_TYPE_NO_HEADER;
   pt->poll = file_panel_asset_browsing_poll;
   pt->draw = file_panel_asset_catalog_buttons_draw;
+  BLI_addtail(&art->paneltypes, pt);
+
+  /* FModel folder tree panel. */
+  pt = MEM_callocN<PanelType>("spacetype file fmodel tree");
+  STRNCPY(pt->idname, "FILE_PT_fmodel_tree");
+  STRNCPY(pt->label, N_("FModel Folders"));
+  STRNCPY(pt->translation_context, BLT_I18NCONTEXT_DEFAULT_BPYRNA);
+  pt->flag = PANEL_TYPE_NO_HEADER;
+  pt->poll = [](const bContext *C, PanelType * /*pt*/) -> bool {
+    const SpaceFile *sfile = CTX_wm_space_file(C);
+    return (sfile && sfile->params && sfile->params->type == FILE_FMODEL_HTTP);
+  };
+  pt->draw = [](const bContext *C, Panel *panel) {
+    file_fmodel_tree_view_draw(C, panel->layout);
+  };
   BLI_addtail(&art->paneltypes, pt);
 }

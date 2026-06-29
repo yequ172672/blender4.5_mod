@@ -188,6 +188,7 @@ const EnumPropertyItem rna_enum_space_sequencer_view_type_items[] = {
 const EnumPropertyItem rna_enum_space_file_browse_mode_items[] = {
     {FILE_BROWSE_MODE_FILES, "FILES", ICON_FILEBROWSER, "File Browser", ""},
     {FILE_BROWSE_MODE_ASSETS, "ASSETS", ICON_ASSET_MANAGER, "Asset Browser", ""},
+    {FILE_BROWSE_MODE_FMODEL, "FMODEL", ICON_MESH_DATA, "FModel", "Browse FModel HeadlessHost assets"},
     {0, nullptr, 0, nullptr, nullptr},
 };
 
@@ -538,6 +539,21 @@ static const EnumPropertyItem fileselectparams_display_type_items[] = {
      "Horizontal List",
      "Display files as a horizontal list"},
     {FILE_IMGDISPLAY, "THUMBNAIL", ICON_IMGDISPLAY, "Thumbnails", "Display files as thumbnails"},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
+static const EnumPropertyItem rna_enum_fileselect_type_items[] = {
+    {FILE_UNIX, "UNIX", 0, "File System", "Browse the file system"},
+    {FILE_LOADLIB, "LOADLIB", 0, "Blender Library", "Browse Blender library data-blocks"},
+    {FILE_MAIN, "MAIN", 0, "Main", "Browse current Main data-blocks"},
+    {FILE_MAIN_ASSET, "MAIN_ASSET", 0, "Main Assets", "Browse assets from current Main"},
+    {FILE_ASSET_LIBRARY, "ASSET_LIBRARY", 0, "Asset Library", "Browse an external asset library"},
+    {FILE_ASSET_LIBRARY_ALL,
+     "ASSET_LIBRARY_ALL",
+     0,
+     "All Asset Libraries",
+     "Browse all asset libraries"},
+    {FILE_FMODEL_HTTP, "FMODEL_HTTP", 0, "FModel", "Browse FModel HeadlessHost assets"},
     {0, nullptr, 0, nullptr, nullptr},
 };
 
@@ -3189,6 +3205,10 @@ static StructRNA *rna_FileBrowser_params_typef(PointerRNA *ptr)
   }
   if (params == (void *)ED_fileselect_get_asset_params(sfile)) {
     return &RNA_FileAssetSelectParams;
+  }
+  /* FModel uses the regular FileSelectParams (stored in sfile->params like Files mode). */
+  if (sfile->browse_mode == FILE_BROWSE_MODE_FMODEL) {
+    return &RNA_FileSelectParams;
   }
 
   BLI_assert_msg(0, "Could not identify file select parameters");
@@ -7318,6 +7338,12 @@ static void rna_def_fileselect_params(BlenderRNA *brna)
   RNA_def_property_enum_items(prop, fileselectparams_display_type_items);
   RNA_def_property_enum_funcs(prop, nullptr, nullptr, "rna_FileSelectParams_display_type_itemf");
   RNA_def_property_ui_text(prop, "Display Mode", "Display mode for the file list");
+  RNA_def_property_update(prop, NC_SPACE | ND_SPACE_FILE_PARAMS, nullptr);
+
+  prop = RNA_def_property(srna, "type", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "type");
+  RNA_def_property_enum_items(prop, rna_enum_fileselect_type_items);
+  RNA_def_property_ui_text(prop, "Type", "File select type (determines data source)");
   RNA_def_property_update(prop, NC_SPACE | ND_SPACE_FILE_PARAMS, nullptr);
 
   prop = RNA_def_property(srna, "recursion_level", PROP_ENUM, PROP_NONE);

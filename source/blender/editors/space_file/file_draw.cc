@@ -48,6 +48,7 @@
 #include "IMB_thumbs.hh"
 
 #include "DNA_userdef_types.h"
+#include "DNA_space_types.h"
 #include "DNA_windowmanager_types.h"
 
 #include "RNA_access.hh"
@@ -1391,6 +1392,37 @@ void file_draw_list(const bContext *C, ARegion *region)
       if (do_drag) {
         file_add_preview_drag_but(
             sfile, block, layout, file, path, &tile_draw_rect, preview_imb, file_type_icon);
+      }
+
+      /* FModel: per-tile import button for non-directory entries. */
+      if (sfile->params && sfile->params->type == FILE_FMODEL_HTTP && !(file->typeflag & FILE_TYPE_DIR) &&
+          !FILENAME_IS_CURRPAR(file->relpath))
+      {
+        /* Construct asset_id = params->dir + "/" + file->relpath */
+        const char *sep = (params->dir[0] && params->dir[strlen(params->dir) - 1] == '/') ? "" : "/";
+        char asset_id[FILE_MAX];
+        SNPRINTF(asset_id, "%s%s%s", params->dir, sep, file->relpath);
+
+        /* Import button at bottom-right of tile. */
+        const float but_size = UI_UNIT_X * 0.9f;
+        const float but_x = float(tile_draw_rect.xmax) - but_size - 2.0f * UI_SCALE_FAC;
+        const float but_y = float(tile_draw_rect.ymin) + 2.0f * UI_SCALE_FAC;
+
+        uiBut *but = uiDefIconButO(block,
+                                   UI_BTYPE_BUT,
+                                   "fmodel.full_import",
+                                   WM_OP_INVOKE_DEFAULT,
+                                   ICON_IMPORT,
+                                   but_x,
+                                   but_y,
+                                   but_size,
+                                   but_size,
+                                   TIP_("Import this asset (mesh + materials)"));
+
+        if (but) {
+          PointerRNA *props = UI_but_operator_ptr_ensure(but);
+          RNA_string_set(props, "asset_id", asset_id);
+        }
       }
     }
     else {

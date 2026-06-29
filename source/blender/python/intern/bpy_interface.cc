@@ -265,6 +265,9 @@ static PyObject *CCL_initPython()
 PyObject *BPyInit_hydra();
 #endif
 
+/* Defined in `fmodel_py_api.cc` (_fmodel_filebrowser module). */
+PyMODINIT_FUNC PyInit__fmodel_filebrowser();
+
 static _inittab bpy_internal_modules[] = {
     {"mathutils", PyInit_mathutils},
 #if 0
@@ -294,6 +297,7 @@ static _inittab bpy_internal_modules[] = {
 #endif
     {"gpu", BPyInit_gpu},
     {"idprop", BPyInit_idprop},
+    {"_fmodel_filebrowser", PyInit__fmodel_filebrowser},
 #ifdef WITH_HYDRA
     {"_bpy_hydra", BPyInit_hydra},
 #endif

@@ -81,6 +81,8 @@
 
 #include "file_indexer.hh"
 #include "file_intern.hh"
+#include "file_fmodel_http.hh"
+#include "file_fmodel_bridge.hh"
 #include "filelist.hh"
 
 using namespace blender;
@@ -353,6 +355,10 @@ static void filelist_readjob_all_asset_library(FileListReadJob *job_params,
                                                bool *stop,
                                                bool *do_update,
                                                float *progress);
+static void filelist_readjob_fmodel(FileListReadJob *job_params,
+                                    bool *stop,
+                                    bool *do_update,
+                                    float *progress);
 
 /* helper, could probably go in BKE actually? */
 static int groupname_to_code(const char *group);
@@ -1868,6 +1874,12 @@ void filelist_settype(FileList *filelist, short type)
       filelist->filter_fn = is_filtered_asset_library;
       filelist->tags |= FILELIST_TAGS_USES_MAIN_DATA;
       break;
+    case FILE_FMODEL_HTTP:
+      filelist->check_dir_fn = filelist_checkdir_fmodel;
+      filelist->read_job_fn = filelist_readjob_fmodel;
+      filelist->prepare_filter_fn = nullptr;
+      filelist->filter_fn = is_filtered_file;
+      break;
     default:
       filelist->check_dir_fn = filelist_checkdir_dir;
       filelist->read_job_fn = filelist_readjob_dir;
@@ -2075,10 +2087,13 @@ bool filelist_is_dir(const FileList *filelist, const char *path)
 void filelist_setdir(FileList *filelist, char dirpath[FILE_MAX_LIBEXTRA])
 {
   const bool allow_invalid = filelist->asset_library_ref != nullptr;
+  const bool is_fmodel = filelist->type == FILE_FMODEL_HTTP;
   BLI_assert(strlen(dirpath) < FILE_MAX_LIBEXTRA);
 
-  BLI_path_abs(dirpath, BKE_main_blendfile_path_from_global());
-  BLI_path_normalize_dir(dirpath, FILE_MAX_LIBEXTRA);
+  if (!is_fmodel) {
+    BLI_path_abs(dirpath, BKE_main_blendfile_path_from_global());
+    BLI_path_normalize_dir(dirpath, FILE_MAX_LIBEXTRA);
+  }
   const bool is_valid_path = filelist->check_dir_fn(filelist, dirpath, !allow_invalid);
   BLI_assert(is_valid_path || allow_invalid);
   UNUSED_VARS_NDEBUG(is_valid_path);
@@ -3888,6 +3903,104 @@ static void filelist_readjob_lib(FileListReadJob *job_params,
 {
   filelist_readjob_do(true, job_params, stop, do_update, progress);
 }
+
+/* -------------------------------------------------------------------- */
+/** \name FModel Read Job
+ * \{ */
+
+static void filelist_readjob_fmodel(FileListReadJob *job_params,
+                                    bool * /*stop*/,
+                                    bool *do_update,
+                                    float * /*progress*/)
+{
+  FileList *filelist = job_params->tmp_filelist;
+  BLI_assert(BLI_listbase_is_empty(&filelist->filelist.entries) &&
+             (filelist->filelist.entries_num == FILEDIR_NBR_ENTRIES_UNSET));
+
+  /* A valid, but empty directory from now. */
+  filelist->filelist.entries_num = 0;
+
+  const char *root = filelist->filelist.root;
+  if (!root || root[0] == '\0') {
+    root = "/Game";
+  }
+
+  char *json = FMODEL_filebrowser_http_tree(root);
+  if (!json) {
+    /* Create an error placeholder entry. */
+    FileListInternEntry *entry = MEM_new<FileListInternEntry>(__func__);
+    entry->relpath = BLI_strdup("Host not running");
+    entry->name = BLI_strdup("Host not running");
+    entry->free_name = true;
+    entry->typeflag = eFileSel_File_Types(0);  /* Non-directory, non-clickable */
+    entry->uid = filelist_uid_generate(filelist);
+
+    ListBase entries = {nullptr};
+    BLI_addtail(&entries, entry);
+    filelist_readjob_append_entries(job_params, &entries, 1);
+    return;
+  }
+
+  /* Parse JSON into FmodelEntry array. */
+  FmodelEntry parsed[512];
+  int count = FMODEL_filebrowser_parse_tree_response(json, parsed, 512);
+  MEM_freeN(json);
+
+  if (count <= 0) {
+    return;
+  }
+
+  ListBase entries = {nullptr};
+  int entries_num = 0;
+
+  for (int i = 0; i < count; i++) {
+    FileListInternEntry *entry = MEM_new<FileListInternEntry>(__func__);
+    entry->relpath = BLI_strdup(parsed[i].name);
+    entry->name = BLI_strdup(parsed[i].name);
+    entry->free_name = true;
+
+    if (parsed[i].is_folder) {
+      entry->typeflag = FILE_TYPE_DIR;
+    }
+    else {
+      entry->typeflag = FILE_TYPE_BLENDERLIB;
+      entry->blentype = 0;
+
+      /* Set type icon from registered type icons. */
+      const char *icon_type = parsed[i].type;
+      if (icon_type[0] == '\0') {
+        icon_type = "Unknown";
+      }
+      ImBuf *icon_ibuf = FMODEL_filebrowser_get_type_icon(icon_type);
+      if (icon_ibuf) {
+        PreviewImage *preview = BKE_previewimg_create();
+        if (preview && icon_ibuf->byte_buffer.data) {
+          const size_t size = size_t(icon_ibuf->x) * icon_ibuf->y * 4;
+          preview->rect[0] = (unsigned int *)MEM_dupallocN(icon_ibuf->byte_buffer.data);
+          preview->w[0] = icon_ibuf->x;
+          preview->h[0] = icon_ibuf->y;
+          preview->changed_timestamp[0]++;
+          entry->local_data.preview_image = preview;
+        }
+        else if (preview) {
+          BKE_previewimg_free(&preview);
+        }
+      }
+    }
+
+    entry->uid = filelist_uid_generate(filelist);
+
+    BLI_addtail(&entries, entry);
+    entries_num++;
+  }
+
+  if (entries_num > 0) {
+    *do_update = true;
+    filelist_readjob_append_entries(job_params, &entries, entries_num);
+  }
+}
+
+/** \} */
 
 /**
  * Load asset library data, which currently means loading the asset catalogs for the library.
