@@ -55,6 +55,37 @@
 #include <cstdlib>
 #include <cstring>
 
+static bool file_or_fmodel_browsing_poll(bContext *C)
+{
+  if (!ED_operator_file_active(C)) {
+    return false;
+  }
+
+  const SpaceFile *sfile = CTX_wm_space_file(C);
+  return ED_fileselect_is_file_browser(sfile) || ED_fileselect_is_fmodel_browser(sfile);
+}
+
+static bool fmodel_parent_dir(FileSelectParams *params)
+{
+  char *dir = params->dir;
+  if (!dir || dir[0] == '\0' || STREQ(dir, "/Game") || STREQ(dir, "/Game/")) {
+    return false;
+  }
+
+  char *last_slash = strrchr(dir, '/');
+  if (!last_slash || last_slash == dir) {
+    STRNCPY(params->dir, "/Game/");
+    return true;
+  }
+  if (STREQ(last_slash, "/Content")) {
+    STRNCPY(params->dir, "/Game/");
+    return true;
+  }
+
+  *last_slash = '\0';
+  return true;
+}
+
 /* -------------------------------------------------------------------- */
 /** \name File Selection Utilities
  * \{ */
@@ -198,19 +229,25 @@ static FileSelect file_select_do(bContext *C, int selected_idx, bool do_diropen)
             filelist_setrecursion(sfile->files, params->recursion_level);
           }
         }
+        else if (params->type == FILE_FMODEL_HTTP) {
+          /* FModel: use Host canonical folder id when available, no filesystem normalization. */
+          if (file->redirection_path && file->redirection_path[0] != '\0') {
+            STRNCPY(params->dir, file->redirection_path);
+          }
+          else {
+            char temp[FILE_MAX];
+            SNPRINTF(temp,
+                     "%s%s%s",
+                     params->dir,
+                     (params->dir[strlen(params->dir) - 1] == '/') ? "" : "/",
+                     file->relpath);
+            STRNCPY(params->dir, temp);
+          }
+        }
         else if (file->redirection_path) {
           STRNCPY(params->dir, file->redirection_path);
           BLI_path_abs(params->dir, BKE_main_blendfile_path(bmain));
           BLI_path_normalize_dir(params->dir, sizeof(params->dir));
-        }
-        else if (params->type == FILE_FMODEL_HTTP) {
-          /* FModel: simple string append with '/' separator, no path normalization. */
-          char temp[FILE_MAX];
-          SNPRINTF(temp, "%s%s%s",
-                   params->dir,
-                   (params->dir[strlen(params->dir) - 1] == '/') ? "" : "/",
-                   file->relpath);
-          STRNCPY(params->dir, temp);
         }
         else {
           BLI_path_abs(params->dir, BKE_main_blendfile_path(bmain));
@@ -224,6 +261,32 @@ static FileSelect file_select_do(bContext *C, int selected_idx, bool do_diropen)
     }
     else {
       retval = FILE_SELECT_FILE;
+      /* FModel: native browser single-click selection sync.
+       * When the user clicks a non-folder FModel entry, push the asset_id
+       * and asset_name to the Python-side Scene.fmodel properties so the
+       * Python tool panels stay in sync with the native file browser. */
+      if (params->type == FILE_FMODEL_HTTP) {
+        const char *asset_id = file->redirection_path;
+        char fallback_id[FILE_MAX];
+        if (!asset_id || asset_id[0] == '\0') {
+          SNPRINTF(fallback_id,
+                   "%s%s%s",
+                   params->dir,
+                   (params->dir[strlen(params->dir) - 1] == '/') ? "" : "/",
+                   file->relpath);
+          asset_id = fallback_id;
+        }
+
+        wmOperatorType *ot = WM_operatortype_find("fmodel.set_selected_asset", false);
+        if (ot) {
+          PointerRNA ptr;
+          WM_operator_properties_create_ptr(&ptr, ot);
+          RNA_string_set(&ptr, "asset_id", asset_id);
+          RNA_string_set(&ptr, "asset_name", file->name);
+          WM_operator_name_call_ptr(C, ot, WM_OP_EXEC_DEFAULT, &ptr, nullptr);
+          WM_operator_properties_free(&ptr);
+        }
+      }
     }
     fileselect_file_set(C, sfile, selected_idx);
   }
@@ -2069,7 +2132,7 @@ static bool file_execute(bContext *C, SpaceFile *sfile)
   FileSelectParams *params = ED_fileselect_get_active_params(sfile);
   FileDirEntry *file = filelist_file(sfile->files, params->active_file);
 
-  if (file && file->redirection_path) {
+  if (file && file->redirection_path && params->type != FILE_FMODEL_HTTP) {
     /* redirection_path is an absolute path that takes precedence
      * over using params->dir + params->file. */
     BLI_path_split_dir_file(file->redirection_path,
@@ -2093,13 +2156,19 @@ static bool file_execute(bContext *C, SpaceFile *sfile)
       BLI_path_parent_dir(params->dir);
     }
     else if (params->type == FILE_FMODEL_HTTP) {
-      /* FModel: simple string append, no path normalization. */
-      char temp[FILE_MAX];
-      SNPRINTF(temp, "%s%s%s",
-               params->dir,
-               (params->dir[strlen(params->dir) - 1] == '/') ? "" : "/",
-               file->relpath);
-      STRNCPY(params->dir, temp);
+      /* FModel: use Host canonical folder id when available, no filesystem normalization. */
+      if (file->redirection_path && file->redirection_path[0] != '\0') {
+        STRNCPY(params->dir, file->redirection_path);
+      }
+      else {
+        char temp[FILE_MAX];
+        SNPRINTF(temp,
+                 "%s%s%s",
+                 params->dir,
+                 (params->dir[strlen(params->dir) - 1] == '/') ? "" : "/",
+                 file->relpath);
+        STRNCPY(params->dir, temp);
+      }
     }
     else {
       BLI_path_abs(params->dir, BKE_main_blendfile_path(bmain));
@@ -2110,12 +2179,17 @@ static bool file_execute(bContext *C, SpaceFile *sfile)
   }
   /* FModel double-click: preview asset. */
   else if (params->type == FILE_FMODEL_HTTP && file) {
-    /* Construct full UE asset path */
-    char asset_id[FILE_MAX];
-    SNPRINTF(asset_id, "%s%s%s",
-             params->dir,
-             (params->dir[strlen(params->dir) - 1] == '/') ? "" : "/",
-             file->relpath);
+    /* Use canonical asset_id from Host (stored in redirection_path) when available. */
+    const char *asset_id = file->redirection_path;
+    char fallback_asset_id[FILE_MAX];
+    if (!asset_id || asset_id[0] == '\0') {
+      SNPRINTF(fallback_asset_id,
+               "%s%s%s",
+               params->dir,
+               (params->dir[strlen(params->dir) - 1] == '/') ? "" : "/",
+               file->relpath);
+      asset_id = fallback_asset_id;
+    }
 
     /* Call Python operator fmodel.preview_asset */
     wmOperatorType *ot = WM_operatortype_find("fmodel.preview_asset", false);
@@ -2193,7 +2267,7 @@ void FILE_OT_execute(wmOperatorType *ot)
    *
    * Avoid using #file_operator_poll since this is also used for entering directories
    * which is used even when the file manager doesn't have an operator. */
-  ot->poll = ED_operator_file_browsing_active;
+  ot->poll = file_or_fmodel_browsing_poll;
 }
 
 /**
@@ -2247,7 +2321,7 @@ void FILE_OT_mouse_execute(wmOperatorType *ot)
 
   /* API callbacks. */
   ot->invoke = file_execute_mouse_invoke;
-  ot->poll = ED_operator_file_browsing_active;
+  ot->poll = file_or_fmodel_browsing_poll;
 
   ot->flag = OPTYPE_INTERNAL;
 }
@@ -2286,7 +2360,7 @@ void FILE_OT_refresh(wmOperatorType *ot)
 
   /* API callbacks. */
   ot->exec = file_refresh_exec;
-  ot->poll = ED_operator_file_browsing_active; /* <- important, handler is on window level */
+  ot->poll = file_or_fmodel_browsing_poll; /* <- important, handler is on window level */
 }
 
 /** \} */
@@ -2302,9 +2376,13 @@ static wmOperatorStatus file_parent_exec(bContext *C, wmOperator * /*unused*/)
   FileSelectParams *params = ED_fileselect_get_active_params(sfile);
 
   if (params) {
-    if (BLI_path_parent_dir(params->dir)) {
-      BLI_path_abs(params->dir, BKE_main_blendfile_path(bmain));
-      BLI_path_normalize_dir(params->dir, sizeof(params->dir));
+    const bool is_fmodel = ED_fileselect_is_fmodel_browser(sfile);
+    const bool changed = is_fmodel ? fmodel_parent_dir(params) : BLI_path_parent_dir(params->dir);
+    if (changed) {
+      if (!is_fmodel) {
+        BLI_path_abs(params->dir, BKE_main_blendfile_path(bmain));
+        BLI_path_normalize_dir(params->dir, sizeof(params->dir));
+      }
       ED_file_change_dir(C);
       if (params->recursion_level > 1) {
         /* Disable `dirtree` recursion when going up in tree. */
@@ -2328,7 +2406,50 @@ void FILE_OT_parent(wmOperatorType *ot)
   /* API callbacks. */
   ot->exec = file_parent_exec;
   /* File browsing only operator (not asset browsing). */
-  ot->poll = ED_operator_file_browsing_active; /* <- important, handler is on window level */
+  ot->poll = file_or_fmodel_browsing_poll; /* <- important, handler is on window level */
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name FModel Navigate Home Operator
+ * \{ */
+
+static bool fmodel_browsing_poll(bContext *C)
+{
+  if (!ED_operator_file_active(C)) {
+    return false;
+  }
+  const SpaceFile *sfile = CTX_wm_space_file(C);
+  return ED_fileselect_is_fmodel_browser(sfile);
+}
+
+static wmOperatorStatus file_fmodel_home_exec(bContext *C, wmOperator * /*unused*/)
+{
+  SpaceFile *sfile = CTX_wm_space_file(C);
+  FileSelectParams *params = ED_fileselect_get_active_params(sfile);
+
+  if (params) {
+    STRNCPY(params->dir, "/Game/");
+    params->active_file = -1;
+    params->filter_search[0] = '\0';
+    ED_file_change_dir(C);
+  }
+
+  return OPERATOR_FINISHED;
+}
+
+void FILE_OT_fmodel_home(wmOperatorType *ot)
+{
+  /* identifiers */
+  ot->name = "FModel Home";
+  ot->description = "Navigate to the FModel asset root";
+  ot->idname = "FILE_OT_fmodel_home";
+
+  /* API callbacks. */
+  ot->exec = file_fmodel_home_exec;
+  ot->poll = fmodel_browsing_poll;
+  ot->flag = OPTYPE_INTERNAL;
 }
 
 /** \} */
@@ -2364,7 +2485,7 @@ void FILE_OT_previous(wmOperatorType *ot)
   /* API callbacks. */
   ot->exec = file_previous_exec;
   /* File browsing only operator (not asset browsing). */
-  ot->poll = ED_operator_file_browsing_active; /* <- important, handler is on window level */
+  ot->poll = file_or_fmodel_browsing_poll; /* <- important, handler is on window level */
 }
 
 /** \} */
@@ -2401,7 +2522,7 @@ void FILE_OT_next(wmOperatorType *ot)
   /* API callbacks. */
   ot->exec = file_next_exec;
   /* File browsing only operator (not asset browsing). */
-  ot->poll = ED_operator_file_browsing_active; /* <- important, handler is on window level */
+  ot->poll = file_or_fmodel_browsing_poll; /* <- important, handler is on window level */
 }
 
 /** \} */

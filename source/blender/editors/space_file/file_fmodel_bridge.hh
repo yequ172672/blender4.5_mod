@@ -22,5 +22,5 @@ void FMODEL_filebrowser_refresh(struct bContext *C);
 
 /* Type icon registration (called from Python). */
 void FMODEL_filebrowser_register_type_icon(const char *type_name, const char *png_path);
-ImBuf *FMODEL_filebrowser_get_type_icon(const char *type_name);
+ImBuf *FMODEL_filebrowser_get_type_icon_copy(const char *type_name);
 void FMODEL_filebrowser_clear_type_icons();

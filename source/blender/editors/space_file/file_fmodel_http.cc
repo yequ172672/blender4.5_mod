@@ -13,6 +13,7 @@
 
 #include "BLI_listbase.h"
 #include "BLI_string.h"
+#include "BLI_vector.hh"
 
 #include "DNA_space_enums.h"
 
@@ -46,14 +47,104 @@
 static char fmodel_host[64] = "127.0.0.1";
 static int fmodel_port = 6170;
 
+static bool fmodel_http_header_contains(const char *headers,
+                                        const char *name,
+                                        const char *value)
+{
+  if (!headers || !name || !value) {
+    return false;
+  }
+
+  const size_t name_len = strlen(name);
+  const char *line = headers;
+  while (line && *line) {
+    const char *line_end = strstr(line, "\r\n");
+    if (!line_end) {
+      line_end = line + strlen(line);
+    }
+    if (BLI_strncasecmp(line, name, name_len) == 0 && line[name_len] == ':') {
+      const char *header_value = line + name_len + 1;
+      while (header_value < line_end && (*header_value == ' ' || *header_value == '\t')) {
+        header_value++;
+      }
+      const size_t value_len = strlen(value);
+      for (const char *p = header_value; p + value_len <= line_end; p++) {
+        if (BLI_strncasecmp(p, value, value_len) == 0) {
+          return true;
+        }
+      }
+    }
+    line = (*line_end == '\0') ? nullptr : line_end + 2;
+  }
+
+  return false;
+}
+
+static char *fmodel_http_decode_chunked_body(const char *body)
+{
+  if (!body) {
+    return nullptr;
+  }
+
+  const char *p = body;
+  size_t decoded_len = 0;
+  char *decoded = static_cast<char *>(MEM_mallocN(1, "fmodel_http_chunked_body"));
+  decoded[0] = '\0';
+
+  while (*p) {
+    char *end = nullptr;
+    const long chunk_size = strtol(p, &end, 16);
+    if (end == p || chunk_size < 0) {
+      MEM_freeN(decoded);
+      return nullptr;
+    }
+
+    const char *line_end = strstr(end, "\r\n");
+    if (!line_end) {
+      MEM_freeN(decoded);
+      return nullptr;
+    }
+    p = line_end + 2;
+
+    if (chunk_size == 0) {
+      break;
+    }
+
+    decoded = static_cast<char *>(
+        MEM_reallocN(decoded, decoded_len + size_t(chunk_size) + 1));
+    memcpy(decoded + decoded_len, p, size_t(chunk_size));
+    decoded_len += size_t(chunk_size);
+    decoded[decoded_len] = '\0';
+
+    p += chunk_size;
+    if (p[0] == '\r' && p[1] == '\n') {
+      p += 2;
+    }
+    else {
+      MEM_freeN(decoded);
+      return nullptr;
+    }
+  }
+
+  return decoded;
+}
+
 /* Forward declare the set_host from bridge for the linker.
  * Alternatively, define set_host here and have bridge.cc call it via header. */
 void FMODEL_filebrowser_set_host(const char *host, int port)
 {
   if (host) {
+    /* Security: only allow localhost to prevent SSRF. */
+    if (strcmp(host, "127.0.0.1") != 0 && strcmp(host, "localhost") != 0 &&
+        strcmp(host, "::1") != 0) {
+      fprintf(stderr, "FModel: rejected non-localhost host '%s'\n", host);
+      return;
+    }
     SNPRINTF(fmodel_host, "%s", host);
   }
-  fmodel_port = port;
+  if (port > 0 && port <= 65535) {
+    fmodel_port = port;
+  }
 }
 
 bool FMODEL_filebrowser_is_host_available(void)
@@ -126,11 +217,17 @@ static char *http_get(const char *path)
     return nullptr;
   }
 
-  /* Set timeout. */
+  /* Set receive / send timeout (cross-platform). */
 #ifdef _WIN32
   int timeout = 5000;
   setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout));
   setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char *)&timeout, sizeof(timeout));
+#else
+  struct timeval tv;
+  tv.tv_sec = 5;
+  tv.tv_usec = 0;
+  setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 #endif
 
   struct sockaddr_in addr;
@@ -202,15 +299,42 @@ static char *http_get(const char *path)
     return nullptr;
   }
 
+  /* Verify HTTP status line. Expect "HTTP/1.1 2xx" or "HTTP/1.0 2xx". */
+  {
+    /* Need at least "HTTP/1.1 200" (12 chars) before reading response+9. */
+    if (total_len < 12) {
+      MEM_freeN(response);
+      return nullptr;
+    }
+    if (strncmp(response, "HTTP/", 5) != 0) {
+      MEM_freeN(response);
+      return nullptr;
+    }
+    /* Find first space, then parse status code (robust against HTTP version length). */
+    const char *space = strchr(response, ' ');
+    int status_code = space ? atoi(space + 1) : 0;
+    if (status_code < 200 || status_code >= 300) {
+      MEM_freeN(response);
+      return nullptr;
+    }
+  }
+
   /* Find body after "\r\n\r\n". */
   char *body = strstr(response, "\r\n\r\n");
   if (!body) {
     MEM_freeN(response);
     return nullptr;
   }
+  *body = '\0';
   body += 4;
 
-  char *result = BLI_strdup(body);
+  char *result = nullptr;
+  if (fmodel_http_header_contains(response, "Transfer-Encoding", "chunked")) {
+    result = fmodel_http_decode_chunked_body(body);
+  }
+  else {
+    result = BLI_strdup(body);
+  }
   MEM_freeN(response);
   return result;
 }
@@ -288,13 +412,43 @@ static const char *json_parse_string(const char *p, char *out, int out_max)
   }
   p++;
   int i = 0;
-  while (*p && *p != '"' && i < out_max - 1) {
+  while (*p && i < out_max - 1) {
     if (*p == '\\') {
       p++;
-      if (*p) {
-        out[i++] = *p;
-        p++;
+      if (!*p) {
+        break;
       }
+      /* Handle standard JSON escape sequences. */
+      switch (*p) {
+        case '"':
+        case '\\':
+        case '/':
+          out[i++] = *p;
+          break;
+        case 'n':
+          out[i++] = '\n';
+          break;
+        case 't':
+          out[i++] = '\t';
+          break;
+        case 'r':
+          out[i++] = '\r';
+          break;
+        case 'b':
+          out[i++] = '\b';
+          break;
+        case 'f':
+          out[i++] = '\f';
+          break;
+        default:
+          /* Unknown escape: keep literal character. */
+          out[i++] = *p;
+          break;
+      }
+      p++;
+    }
+    else if (*p == '"') {
+      break;
     }
     else {
       out[i++] = *p;
@@ -333,6 +487,25 @@ static const char *json_skip_value(const char *p)
     int depth = 1;
     p++;
     while (*p && depth > 0) {
+      if (*p == '"') {
+        /* Skip string content to avoid counting braces inside strings. */
+        p++;
+        while (*p) {
+          if (*p == '\\' && *(p + 1)) {
+            p += 2;
+            continue;
+          }
+          if (*p == '"') {
+            p++;
+            break;
+          }
+          p++;
+        }
+        if (!*p) {
+          break;
+        }
+        continue;
+      }
       if (*p == closer) {
         depth--;
       }
@@ -350,30 +523,28 @@ static const char *json_skip_value(const char *p)
   return p;
 }
 
-int FMODEL_filebrowser_parse_tree_response(const char *json,
-                                            FmodelEntry *entries_out,
-                                            int max_entries)
+blender::Vector<FmodelEntry> FMODEL_filebrowser_parse_tree_response(const char *json)
 {
-  if (!json || !*json || !entries_out || max_entries <= 0) {
-    return -1;
+  blender::Vector<FmodelEntry> entries;
+
+  if (!json || !*json) {
+    return entries;
   }
 
   /* Find "children" array. */
   const char *p = strstr(json, "\"children\"");
   if (!p) {
-    return -1;
+    return entries;
   }
 
   /* Find '[' after "children": */
   p = strchr(p, '[');
   if (!p) {
-    return -1;
+    return entries;
   }
   p++;
 
-  int count = 0;
-
-  while (p && *p && count < max_entries) {
+  while (p && *p) {
     p = json_skip_ws(p);
     if (*p == ']' || *p == '\0') {
       break;
@@ -434,12 +605,12 @@ int FMODEL_filebrowser_parse_tree_response(const char *json,
       }
 
       if (entry.name[0] != '\0') {
-        entries_out[count++] = entry;
+        entries.append(entry);
       }
     }
   }
 
-  return count;
+  return entries;
 }
 
 /** \} */
@@ -457,4 +628,3 @@ bool filelist_checkdir_fmodel(const FileList * /*filelist*/,
 }
 
 /** \} */
-

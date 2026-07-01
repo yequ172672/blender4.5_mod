@@ -3926,7 +3926,10 @@ static void filelist_readjob_fmodel(FileListReadJob *job_params,
   }
 
   char *json = FMODEL_filebrowser_http_tree(root);
-  if (!json) {
+  if (!json || *json == '\0') {
+    if (json) {
+      MEM_freeN(json);
+    }
     /* Create an error placeholder entry. */
     FileListInternEntry *entry = MEM_new<FileListInternEntry>(__func__);
     entry->relpath = BLI_strdup("Host not running");
@@ -3941,37 +3944,51 @@ static void filelist_readjob_fmodel(FileListReadJob *job_params,
     return;
   }
 
-  /* Parse JSON into FmodelEntry array. */
-  FmodelEntry parsed[512];
-  int count = FMODEL_filebrowser_parse_tree_response(json, parsed, 512);
+  /* Parse JSON into FmodelEntry vector. */
+  blender::Vector<FmodelEntry> parsed = FMODEL_filebrowser_parse_tree_response(json);
   MEM_freeN(json);
 
-  if (count <= 0) {
+  if (parsed.is_empty()) {
     return;
   }
 
   ListBase entries = {nullptr};
   int entries_num = 0;
+  GSet *seenAssetIds = BLI_gset_str_new(__func__);
 
-  for (int i = 0; i < count; i++) {
+  for (const FmodelEntry &item : parsed) {
+    const char *asset_id = item.asset_id[0] != '\0' ? item.asset_id : item.name;
+    if (asset_id[0] != '\0' && BLI_gset_haskey(seenAssetIds, asset_id)) {
+      continue;
+    }
+    if (asset_id[0] != '\0') {
+      BLI_gset_insert(seenAssetIds, BLI_strdup(asset_id));
+    }
+
     FileListInternEntry *entry = MEM_new<FileListInternEntry>(__func__);
-    entry->relpath = BLI_strdup(parsed[i].name);
-    entry->name = BLI_strdup(parsed[i].name);
+    entry->relpath = BLI_strdup(item.name);
+    entry->name = BLI_strdup(item.name);
     entry->free_name = true;
+    entry->redirection_path = nullptr; /* Initialize: MEM_new does not zero-init. */
 
-    if (parsed[i].is_folder) {
+    /* Preserve Host canonical id via redirection_path. */
+    if (item.asset_id[0] != '\0') {
+      entry->redirection_path = BLI_strdup(item.asset_id);
+    }
+
+    if (item.is_folder) {
       entry->typeflag = FILE_TYPE_DIR;
     }
     else {
-      entry->typeflag = FILE_TYPE_BLENDERLIB;
+      entry->typeflag = FILE_TYPE_BLENDERLIB | FILE_TYPE_ASSET;
       entry->blentype = 0;
 
       /* Set type icon from registered type icons. */
-      const char *icon_type = parsed[i].type;
+      const char *icon_type = item.type;
       if (icon_type[0] == '\0') {
         icon_type = "Unknown";
       }
-      ImBuf *icon_ibuf = FMODEL_filebrowser_get_type_icon(icon_type);
+      ImBuf *icon_ibuf = FMODEL_filebrowser_get_type_icon_copy(icon_type);
       if (icon_ibuf) {
         PreviewImage *preview = BKE_previewimg_create();
         if (preview && icon_ibuf->byte_buffer.data) {
@@ -3985,6 +4002,7 @@ static void filelist_readjob_fmodel(FileListReadJob *job_params,
         else if (preview) {
           BKE_previewimg_free(&preview);
         }
+        IMB_freeImBuf(icon_ibuf);
       }
     }
 
@@ -3993,6 +4011,7 @@ static void filelist_readjob_fmodel(FileListReadJob *job_params,
     BLI_addtail(&entries, entry);
     entries_num++;
   }
+  BLI_gset_free(seenAssetIds, MEM_freeN);
 
   if (entries_num > 0) {
     *do_update = true;

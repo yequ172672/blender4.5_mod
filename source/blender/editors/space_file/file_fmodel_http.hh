@@ -13,6 +13,8 @@
 
 #include <cstddef>
 
+#include "BLI_vector.hh"
+
 struct FileList;
 
 /** Entry parsed from the FModel /tree JSON response. */
@@ -43,15 +45,11 @@ void FMODEL_filebrowser_set_host(const char *host, int port);
 char *FMODEL_filebrowser_http_tree(const char *dirpath);
 
 /**
- * Parse the JSON /tree response into an array of FmodelEntry structs.
+ * Parse the JSON /tree response into a vector of FmodelEntry structs.
  * \param json: NUL-terminated JSON string.
- * \param entries_out: Output array to fill.
- * \param max_entries: Capacity of entries_out.
- * \returns Number of entries parsed, or -1 on error.
+ * \returns Vector of parsed entries (empty on error).
  */
-int FMODEL_filebrowser_parse_tree_response(const char *json,
-                                            FmodelEntry *entries_out,
-                                            int max_entries);
+blender::Vector<FmodelEntry> FMODEL_filebrowser_parse_tree_response(const char *json);
 
 /**
  * Returns true if the FModel HeadlessHost is reachable.

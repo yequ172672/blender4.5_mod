@@ -1227,6 +1227,51 @@ static rcti tile_draw_rect_get(const View2D *v2d, const FileLayout *layout, cons
   return rect;
 }
 
+static const char *fmodel_file_asset_id_get(const FileSelectParams *params,
+                                            const FileDirEntry *file,
+                                            char r_fallback_asset_id[FILE_MAX])
+{
+  const char *asset_id = file->redirection_path;
+  if (!asset_id || asset_id[0] == '\0') {
+    const char *sep = (params->dir[0] && params->dir[strlen(params->dir) - 1] == '/') ? "" : "/";
+    BLI_snprintf(r_fallback_asset_id, FILE_MAX, "%s%s%s", params->dir, sep, file->relpath);
+    asset_id = r_fallback_asset_id;
+  }
+  return asset_id;
+}
+
+static void fmodel_add_full_import_but(uiBlock *block,
+                                       const FileSelectParams *params,
+                                       const FileDirEntry *file,
+                                       const rcti *rect,
+                                       const char *tooltip)
+{
+  if (params->type != FILE_FMODEL_HTTP || (file->typeflag & FILE_TYPE_DIR) ||
+      FILENAME_IS_CURRPAR(file->relpath))
+  {
+    return;
+  }
+
+  char fallback_asset_id[FILE_MAX];
+  const char *asset_id = fmodel_file_asset_id_get(params, file, fallback_asset_id);
+
+  uiBut *but = uiDefIconButO(block,
+                             UI_BTYPE_BUT,
+                             "fmodel.full_import",
+                             WM_OP_INVOKE_DEFAULT,
+                             ICON_IMPORT,
+                             rect->xmin,
+                             rect->ymin,
+                             BLI_rcti_size_x(rect),
+                             BLI_rcti_size_y(rect),
+                             tooltip);
+
+  if (but) {
+    PointerRNA *props = UI_but_operator_ptr_ensure(but);
+    RNA_string_set(props, "asset_id", asset_id);
+  }
+}
+
 /**
  * Get the boundaries to display the name label in (this isn't the rectangle of the text itself).
  */
@@ -1395,34 +1440,19 @@ void file_draw_list(const bContext *C, ARegion *region)
       }
 
       /* FModel: per-tile import button for non-directory entries. */
-      if (sfile->params && sfile->params->type == FILE_FMODEL_HTTP && !(file->typeflag & FILE_TYPE_DIR) &&
-          !FILENAME_IS_CURRPAR(file->relpath))
-      {
-        /* Construct asset_id = params->dir + "/" + file->relpath */
-        const char *sep = (params->dir[0] && params->dir[strlen(params->dir) - 1] == '/') ? "" : "/";
-        char asset_id[FILE_MAX];
-        SNPRINTF(asset_id, "%s%s%s", params->dir, sep, file->relpath);
-
+      if (sfile->params) {
         /* Import button at bottom-right of tile. */
         const float but_size = UI_UNIT_X * 0.9f;
-        const float but_x = float(tile_draw_rect.xmax) - but_size - 2.0f * UI_SCALE_FAC;
-        const float but_y = float(tile_draw_rect.ymin) + 2.0f * UI_SCALE_FAC;
-
-        uiBut *but = uiDefIconButO(block,
-                                   UI_BTYPE_BUT,
-                                   "fmodel.full_import",
-                                   WM_OP_INVOKE_DEFAULT,
-                                   ICON_IMPORT,
-                                   but_x,
-                                   but_y,
-                                   but_size,
-                                   but_size,
+        rcti import_rect;
+        import_rect.xmax = round_fl_to_int(float(tile_draw_rect.xmax) - 2.0f * UI_SCALE_FAC);
+        import_rect.xmin = round_fl_to_int(float(import_rect.xmax) - but_size);
+        import_rect.ymin = round_fl_to_int(float(tile_draw_rect.ymin) + 2.0f * UI_SCALE_FAC);
+        import_rect.ymax = round_fl_to_int(float(import_rect.ymin) + but_size);
+        fmodel_add_full_import_but(block,
+                                   sfile->params,
+                                   file,
+                                   &import_rect,
                                    TIP_("Import this asset (mesh + materials)"));
-
-        if (but) {
-          PointerRNA *props = UI_but_operator_ptr_ensure(but);
-          RNA_string_set(props, "asset_id", asset_id);
-        }
       }
     }
     else {
@@ -1494,6 +1524,21 @@ void file_draw_list(const bContext *C, ARegion *region)
                                   tile_draw_rect.xmin + padx - 2,
                                   tile_draw_rect.ymin - 2 * UI_SCALE_FAC,
                                   type_icon);
+      }
+
+      if (sfile->params && params->display == FILE_VERTICALDISPLAY) {
+        const float but_size = UI_UNIT_X * 0.8f;
+        rcti import_rect;
+        import_rect.xmax = tile_draw_rect.xmax - round_fl_to_int(0.4f * UI_UNIT_X);
+        import_rect.xmin = import_rect.xmax - round_fl_to_int(but_size);
+        import_rect.ymin = tile_draw_rect.ymin +
+                           round_fl_to_int((layout->tile_h - but_size) * 0.5f);
+        import_rect.ymax = import_rect.ymin + round_fl_to_int(but_size);
+        fmodel_add_full_import_but(block,
+                                   sfile->params,
+                                   file,
+                                   &import_rect,
+                                   TIP_("Import this asset (mesh + materials)"));
       }
     }
 

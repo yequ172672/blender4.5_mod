@@ -32,15 +32,19 @@
 
 #include "BLI_listbase.h"
 #include "BLI_map.hh"
+#include "BLI_mutex.hh"
 #include "BLI_string.h"
 
 #include <cstring>
+#include <mutex>
 
 /* -------------------------------------------------------------------- */
 /** \name Type Icon Management
  * \{ */
 
 static blender::Map<std::string, ImBuf *> g_type_icons;
+/** Protects concurrent access to #g_type_icons from Python and worker threads. */
+static blender::Mutex g_type_icons_mutex;
 
 void FMODEL_filebrowser_register_type_icon(const char *type_name, const char *png_path)
 {
@@ -53,6 +57,8 @@ void FMODEL_filebrowser_register_type_icon(const char *type_name, const char *pn
     return;
   }
 
+  std::scoped_lock lock(g_type_icons_mutex);
+
   /* If re-registering, free old icon first. */
   if (ImBuf *const *old_ptr = g_type_icons.lookup_ptr(type_name)) {
     IMB_freeImBuf(*old_ptr);
@@ -61,19 +67,24 @@ void FMODEL_filebrowser_register_type_icon(const char *type_name, const char *pn
   g_type_icons.add(std::string(type_name), ibuf);
 }
 
-ImBuf *FMODEL_filebrowser_get_type_icon(const char *type_name)
+ImBuf *FMODEL_filebrowser_get_type_icon_copy(const char *type_name)
 {
   if (!type_name) {
     return nullptr;
   }
+
+  std::scoped_lock lock(g_type_icons_mutex);
+
   if (const ImBuf *const *ptr = g_type_icons.lookup_ptr(type_name)) {
-    return const_cast<ImBuf *>(*ptr);
+    return IMB_dupImBuf(*ptr);
   }
   return nullptr;
 }
 
 void FMODEL_filebrowser_clear_type_icons()
 {
+  std::scoped_lock lock(g_type_icons_mutex);
+
   for (auto item : g_type_icons.items()) {
     IMB_freeImBuf(item.value);
   }

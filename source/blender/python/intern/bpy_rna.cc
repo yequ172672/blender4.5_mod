@@ -10135,12 +10135,6 @@ static PyObject *pyrna_register_class(PyObject * /*self*/, PyObject *py_class)
   /* Takes a reference to 'py_class'. */
   pyrna_subtype_set_rna(py_class, srna_new);
 
-  /* Old srna still references us, keep the check in case registering somehow can free it. */
-  if (PyObject *old_py_class = static_cast<PyObject *>(RNA_struct_py_type_get(srna))) {
-    RNA_struct_py_type_set(srna, nullptr);
-    Py_DECREF(old_py_class);
-  }
-
   /* Can't use this because it returns a dict proxy
    *
    * item = PyObject_GetAttrString(py_class, "__dict__");

@@ -454,7 +454,10 @@ class FILEBROWSER_PT_directory_path(Panel):
 
         subsubrow = subrow.row()
         subsubrow.operator_context = 'EXEC_DEFAULT'
-        subsubrow.operator("file.directory_new", icon='NEWFOLDER', text="")
+        if space.browse_mode == 'FMODEL':
+            subsubrow.operator("file.fmodel_home", icon='HOME', text="")
+        else:
+            subsubrow.operator("file.directory_new", icon='NEWFOLDER', text="")
 
         subrow.template_file_select_path(params)
 

@@ -93,6 +93,7 @@ void file_external_operations_menu_register();
 void FILE_OT_mouse_execute(wmOperatorType *ot);
 void FILE_OT_cancel(wmOperatorType *ot);
 void FILE_OT_parent(wmOperatorType *ot);
+void FILE_OT_fmodel_home(wmOperatorType *ot);
 void FILE_OT_directory_new(wmOperatorType *ot);
 void FILE_OT_previous(wmOperatorType *ot);
 void FILE_OT_next(wmOperatorType *ot);

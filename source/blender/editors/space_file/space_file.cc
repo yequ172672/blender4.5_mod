@@ -37,8 +37,11 @@
 #include "ED_screen.hh"
 #include "ED_space_api.hh"
 
+#include "GPU_state.hh"
+
 #include "IMB_thumbs.hh"
 
+#include "UI_interface_c.hh"
 #include "UI_resources.hh"
 #include "UI_view2d.hh"
 
@@ -70,6 +73,13 @@ static SpaceLink *file_create(const ScrArea * /*area*/, const Scene * /*scene*/)
   region = BKE_area_region_new();
   BLI_addtail(&sfile->regionbase, region);
   region->regiontype = RGN_TYPE_TOOLS;
+  region->alignment = RGN_ALIGN_LEFT;
+
+  /* FModel sidebar region. Kept separate from tools so the native file browser
+   * bookmarks/system/volumes panels can be disabled only for FModel. */
+  region = BKE_area_region_new();
+  BLI_addtail(&sfile->regionbase, region);
+  region->regiontype = RGN_TYPE_CHANNELS;
   region->alignment = RGN_ALIGN_LEFT;
 
   /* ui list region */
@@ -615,6 +625,7 @@ static void file_operatortypes()
   WM_operatortype_append(FILE_OT_mouse_execute);
   WM_operatortype_append(FILE_OT_cancel);
   WM_operatortype_append(FILE_OT_parent);
+  WM_operatortype_append(FILE_OT_fmodel_home);
   WM_operatortype_append(FILE_OT_previous);
   WM_operatortype_append(FILE_OT_next);
   WM_operatortype_append(FILE_OT_refresh);
@@ -656,6 +667,18 @@ static bool file_ui_region_poll(const RegionPollParams *params)
   return sfile->browse_mode != FILE_BROWSE_MODE_ASSETS;
 }
 
+static bool file_tools_region_poll(const RegionPollParams *params)
+{
+  const SpaceFile *sfile = (SpaceFile *)params->area->spacedata.first;
+  return !ELEM(sfile->browse_mode, FILE_BROWSE_MODE_ASSETS, FILE_BROWSE_MODE_FMODEL);
+}
+
+static bool file_fmodel_region_poll(const RegionPollParams *params)
+{
+  const SpaceFile *sfile = (SpaceFile *)params->area->spacedata.first;
+  return sfile->browse_mode == FILE_BROWSE_MODE_FMODEL;
+}
+
 static bool file_tool_props_region_poll(const RegionPollParams *params)
 {
   const SpaceFile *sfile = (SpaceFile *)params->area->spacedata.first;
@@ -683,6 +706,37 @@ static void file_tools_region_init(wmWindowManager *wm, ARegion *region)
 static void file_tools_region_draw(const bContext *C, ARegion *region)
 {
   ED_region_panels(C, region);
+}
+
+static void file_fmodel_region_draw(const bContext *C, ARegion *region)
+{
+  View2D *v2d = &region->v2d;
+
+  ED_region_panels_layout(C, region);
+  ED_region_clear(C, region, TH_PANEL_BACK);
+
+  GPU_line_width(1.0f);
+  UI_view2d_view_ortho(v2d);
+  UI_blocklist_update_window_matrix(C, &region->runtime->uiblocks);
+  UI_panels_draw(C, region);
+  UI_view2d_view_restore(C);
+
+  if (region->runtime->category) {
+    UI_panel_category_draw_all(region, region->runtime->category);
+  }
+
+  bool use_mask = false;
+  rcti mask;
+  if (region->runtime->category &&
+      (RGN_ALIGN_ENUM_FROM_MASK(region->alignment) == RGN_ALIGN_RIGHT) &&
+      UI_panel_category_is_visible(region))
+  {
+    use_mask = true;
+    UI_view2d_mask_from_win(v2d, &mask);
+    mask.xmax -= round_fl_to_int(UI_view2d_scale_get_x(&region->v2d) *
+                                 UI_PANEL_CATEGORY_MARGIN_WIDTH);
+  }
+  UI_view2d_scrollers_draw(v2d, use_mask ? &mask : nullptr);
 }
 
 static void file_tools_region_listener(const wmRegionListenerParams *listener_params)
@@ -1015,11 +1069,24 @@ void ED_spacetype_file()
   art->prefsizex = 240;
   art->prefsizey = 60;
   art->keymapflag = ED_KEYMAP_UI;
+  art->poll = file_tools_region_poll;
   art->listener = file_tools_region_listener;
   art->init = file_tools_region_init;
   art->draw = file_tools_region_draw;
   BLI_addhead(&st->regiontypes, art);
   file_tools_region_panels_register(art);
+
+  /* regions: FModel sidebar */
+  art = MEM_callocN<ARegionType>("spacetype file fmodel region");
+  art->regionid = RGN_TYPE_CHANNELS;
+  art->prefsizex = 240;
+  art->prefsizey = 60;
+  art->keymapflag = ED_KEYMAP_UI;
+  art->poll = file_fmodel_region_poll;
+  art->listener = file_tools_region_listener;
+  art->init = file_tools_region_init;
+  art->draw = file_fmodel_region_draw;
+  BLI_addhead(&st->regiontypes, art);
 
   /* regions: tool properties */
   art = MEM_callocN<ARegionType>("spacetype file operator region");

@@ -146,18 +146,27 @@ static void fileselect_ensure_updated_fmodel_params(SpaceFile *sfile)
     sfile->params->filter_id = 0;
     sfile->params->list_thumbnail_size = 32;
     sfile->params->list_column_size = 220;
-    /* Default to /Game/ root before common init so it isn't overridden. */
-    STRNCPY(sfile->params->dir, "/Game/");
   }
 
   FileSelectParams *params = sfile->params;
-  fileselect_initialize_params_common(sfile, params);
+
+  /* Deterministic reset: always force FModel HTTP type and /Game/ root when entering
+   * FModel mode. This prevents stale local-file-system paths from a previous
+   * FILES/ASSETS browse mode from being reused. */
   params->type = FILE_FMODEL_HTTP;
-  params->display = FILE_IMGDISPLAY;
+  if (params->dir[0] == '\0' || params->dir[0] != '/') {
+    STRNCPY(params->dir, "/Game/");
+  }
+
+  fileselect_initialize_params_common(sfile, params);
+  if (!ELEM(params->display, FILE_VERTICALDISPLAY, FILE_IMGDISPLAY)) {
+    params->display = FILE_IMGDISPLAY;
+  }
   params->sort = FILE_SORT_ALPHA;
   params->filter = 0;
   params->filter_id = 0;
   params->flag &= ~FILE_DIRSEL_ONLY;
+  params->flag &= ~FILE_ASSETS_ONLY;
   params->flag |= FILE_FILTER;
 }
 
@@ -504,6 +513,11 @@ bool ED_fileselect_is_file_browser(const SpaceFile *sfile)
 bool ED_fileselect_is_asset_browser(const SpaceFile *sfile)
 {
   return (sfile->browse_mode == FILE_BROWSE_MODE_ASSETS);
+}
+
+bool ED_fileselect_is_fmodel_browser(const SpaceFile *sfile)
+{
+  return (sfile->browse_mode == FILE_BROWSE_MODE_FMODEL);
 }
 
 blender::asset_system::AssetLibrary *ED_fileselect_active_asset_library_get(const SpaceFile *sfile)

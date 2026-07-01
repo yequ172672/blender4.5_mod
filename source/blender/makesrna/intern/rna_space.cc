@@ -3018,6 +3018,22 @@ static const EnumPropertyItem *rna_FileSelectParams_display_type_itemf(bContext 
     return items;
   }
 
+  FileSelectParams *params = static_cast<FileSelectParams *>(ptr->data);
+  if (params && params->type == FILE_FMODEL_HTTP) {
+    EnumPropertyItem *items = nullptr;
+    int totitem = 0;
+
+    RNA_enum_items_add_value(
+        &items, &totitem, fileselectparams_display_type_items, FILE_VERTICALDISPLAY);
+    RNA_enum_items_add_value(
+        &items, &totitem, fileselectparams_display_type_items, FILE_IMGDISPLAY);
+
+    RNA_enum_item_end(&items, &totitem);
+    *r_free = true;
+
+    return items;
+  }
+
   *r_free = false;
   return fileselectparams_display_type_items;
 }
@@ -3539,6 +3555,11 @@ static void rna_SpaceFileBrowser_browse_mode_update(Main * /*bmain*/,
                                                     PointerRNA *ptr)
 {
   ScrArea *area = rna_area_from_space(ptr);
+  SpaceFile *sfile = static_cast<SpaceFile *>(ptr->data);
+  /* Ensure FModel params are reset deterministically when switching browse mode. */
+  if (sfile->browse_mode == FILE_BROWSE_MODE_FMODEL) {
+    ED_fileselect_ensure_active_params(sfile);
+  }
   ED_area_tag_refresh(area);
 }
 
@@ -7656,7 +7677,9 @@ static void rna_def_space_filebrowser(BlenderRNA *brna)
   RNA_def_struct_ui_text(srna, "Space File Browser", "File browser space data");
 
   rna_def_space_generic_show_region_toggles(
-      srna, (1 << RGN_TYPE_TOOLS) | (1 << RGN_TYPE_UI) | (1 << RGN_TYPE_TOOL_PROPS));
+      srna,
+      (1 << RGN_TYPE_TOOLS) | (1 << RGN_TYPE_CHANNELS) | (1 << RGN_TYPE_UI) |
+          (1 << RGN_TYPE_TOOL_PROPS));
 
   prop = RNA_def_property(srna, "browse_mode", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_items(prop, rna_enum_space_file_browse_mode_items);

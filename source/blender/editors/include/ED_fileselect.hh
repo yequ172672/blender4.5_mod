@@ -158,6 +158,7 @@ void ED_fileselect_exit(wmWindowManager *wm, SpaceFile *sfile);
 
 bool ED_fileselect_is_file_browser(const SpaceFile *sfile);
 bool ED_fileselect_is_asset_browser(const SpaceFile *sfile);
+bool ED_fileselect_is_fmodel_browser(const SpaceFile *sfile);
 blender::asset_system::AssetLibrary *ED_fileselect_active_asset_library_get(
     const SpaceFile *sfile);
 ID *ED_fileselect_active_asset_get(const SpaceFile *sfile);
